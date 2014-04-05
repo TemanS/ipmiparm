@@ -1,62 +1,130 @@
 #include <iostream>
 //#include <cstdio>
+#include <vector>
 #include <string>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
 
-
 using namespace std;
 
-class kmodParm {
+/**************************************************************
+ *
+ */
+class kmodparm {
 public:
+
+    kmodparm() {value = 0; m_isbitmask = false; }
+
     int togglebit(int bit, int& mask) { return bit xor mask; }
 
+    string kmodname;
+    string parmname;
+    int    value;
+
 private:
-    string m_kmodname;
-    string m_parmname;
-    int    m_value;
     bool   m_isbitmask;
 };
 
-int shell(string& cmdstr, string& outstr)
+/**************************************************************
+ *
+ */
+class parmapp {
+public:
+    parmapp() {init();}
+    parmapp(int test) {init(test);}
+    void dump();
+    int shell(stringstream& command, stringstream& outstr);
+
+private:
+    string topdir;
+    vector<kmodparm> parms;
+
+    void init(bool test = false);
+    void init_kmod(string kmod);
+};
+
+/**************************************************************
+ *
+ */
+void parmapp::dump()
+{
+    for (unsigned i = 0; i < parms.size(); ++i) {
+        cout << "kmod: " << parms[i].kmodname
+             << "  parm: " << parms[i].parmname << endl;
+    }
+}
+
+/**************************************************************
+ *
+ */
+void parmapp::init_kmod(string kmod)
+{
+    stringstream cmd;
+    stringstream ss;
+    string str;
+    int i = parms.size();
+
+    cmd << "ls " << topdir << "/module/" << kmod << "/parameters/";
+    shell(cmd, ss);
+
+    while (getline(ss, str)) {
+        parms.resize(parms.size() + 1);
+        parms[i].kmodname = kmod;
+        parms[i].parmname = str;
+        ++i;
+    }
+}
+
+/**************************************************************
+ *
+ */
+void parmapp::init(bool test)
+{
+    topdir = test ? "$HOME/" : "/sys/";
+    init_kmod("ipmi_si");
+    init_kmod("ipmi_msghandler");
+}
+
+/**************************************************************
+ *
+ */
+int parmapp::shell(stringstream& command, stringstream& outstr)
 {
     string fname = "cmdout.txt";
     fstream file;
     string line;
-    stringstream ss;
 
-    file.open(fname.c_str());
+    file.open(fname.c_str(), ios::out | ios::in | ios::trunc);
 
     if (!file.is_open()) {
-        cout << "Error occurred creating file filename: " << fname << endl;
-        return(1);
+        cout << "parmapp::shell(): Error occurred creating file filename: "
+             << fname << endl;
+        return 1;
     }
 
-    stringstream command;
-    command << cmdstr << " > " << (const char*)fname.c_str();
+    command << " > " << (const char*)fname.c_str() << endl;
     system(command.str().c_str());
 
     while (getline(file, line))
-        ss << line << endl;
+        outstr << line << endl;
 
-    outstr = ss.str();
     file.close();
-    cout << outstr << endl;
-
-    //::remove(fname.c_str());
+    ::remove(fname.c_str());
     return 0;
 }
 
-int main()
+/**************************************************************
+**
+***************************************************************/
+int main(int argc, char** argv)
 {
-    string ipmi_si = "ipmi_si";
-    string ipmi__msg = "ipmi_msghandler";
-    string cmd = "ls $HOME/module/ipmi_si/parameters/";
-    string rst;
+    parmapp pa(argc);
 
-    shell(cmd, rst);
-    cout << rst << endl;
-    return 0;
+    cout << argv[0] << ": ipmi kmod parameter manager\n\n";
+
+    pa.dump();
+
+     return 0;
 }
 
