@@ -130,13 +130,16 @@ void parmapp::init_kmod(string kmod)
     shell(cmd, s1);
 
     while (getline(s1, str)) {
+	if (str == "hotmod")
+		continue;
         parms.resize(parms.size() + 1);
         parms[i].kmodname = kmod;
         parms[i].parmname = str;
 
         cmd.str("");
         s2.str("");
-        cmd << "cat " << dir << str;
+        cmd << "cat " << dir << str << "\n";
+	cmd.flush();
         shell(cmd, s2);
         s2 >> parms[i].value;
         ++i;
@@ -269,11 +272,20 @@ int parmapp::getint(string prompt, int curval)
  */
 void parmapp::editparm(kmodparm& parm)
 {
+    string parmfile = topdir;
+    stringstream cmd;
+    stringstream ss;
+
     printf("  %-15s: %3d  :  0x%02x\n",
            parm.parmname.c_str(),
            parm.value, parm.value);
     cout << "----------------------------------\n";
     parm.value = getint("  New value: ", parm.value);
+    cmd.str("");
+    ss.str("");
+    parmfile = topdir + "module/" + parm.kmodname + "/parameters/" + parm.parmname;
+    cmd << "echo " << parm.value << " > " << parmfile << "\n";
+    shell(cmd, ss);
 }
 
 
@@ -288,6 +300,9 @@ void parmapp::editparm(kmodparm& parm)
 void parmapp::editparmbitmask(kmodparm& parm)
 {
     char ch;
+    string parmfile;
+    stringstream cmd;
+    stringstream ss;
 
     while (true) {
         printf("  %-15s: %3d  :  0x%02x  :  %s\n",
@@ -314,6 +329,11 @@ void parmapp::editparmbitmask(kmodparm& parm)
         case '6' :
         case '7' : parm.togglebit(toxint(ch), parm.value); break;
         }
+        cmd.str("");
+        ss.str("");
+        parmfile = topdir + "module/" + parm.kmodname + "/parameters/" + parm.parmname;
+        cmd << "echo " << parm.value << " > " << parmfile << "\n";
+        shell(cmd, ss);
     }
 }
 
@@ -376,16 +396,13 @@ void parmapp::showmenu()
 void parmapp::getmenu()
 {
     char ch;
-    string parmfile = topdir + "module/";
-    stringstream cmd;
-    stringstream ss;
 
     while (true) {
         showmenu();
         ch = getchar();
 
         switch (ch) {
-        case 'q': return;
+        case 'q': cout << endl; return;
         case 'r': toggleradix(); break;
         }
 
@@ -399,12 +416,6 @@ void parmapp::getmenu()
             editparm(parms[i]);
         else
             editparmbitmask(parms[i]);
-
-        cmd.str("");
-        ss.str("");
-        parmfile += parms[i].kmodname + "/parameters/" + parms[i].parmname;
-        cmd << "echo " << parms[i].value << " > " << parmfile;
-        shell(cmd, ss);
     }
 }
 
@@ -414,7 +425,7 @@ void parmapp::getmenu()
 int main(int argc, char** argv)
 {
     cout << argv[0] << ": ipmi kmod parameter manager\n";
-    parmapp pa(argc);
+    parmapp pa;
     pa.getmenu();
      return 0;
 }
