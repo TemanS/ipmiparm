@@ -46,6 +46,7 @@ public:
     kmodparm() {value = 0; m_isbitmask = false; }
 
     int togglebit(int bit, int& mask) { return bit xor mask; }
+    string tobin(int hex, int bits);
 
     string kmodname;
     string parmname;
@@ -54,6 +55,18 @@ public:
 private:
     bool   m_isbitmask;
 };
+
+string kmodparm::tobin(int num, int bits)
+{
+    string temp;
+    int bit;
+    temp.resize(bits);
+    for (int i = 0; i < bits; ++i) {
+        bit = 1 << i;
+        temp[i] = bit & num ? '1' : '0';
+    }
+    return temp;
+}
 
 /**************************************************************
  * class parmapp
@@ -69,6 +82,7 @@ public:
     template <typename T> void init_parms(T parm, stringstream vals);
     char getchar();
     int toxint(char c);
+    void editparm(kmodparm& parm);
 
 private:
     string topdir;
@@ -178,7 +192,8 @@ char parmapp::getchar()
 /**************************************************************
  * parmapp::toxint - convert single hex (base 16) chars to digits
  *
- */int parmapp::toxint(char c)
+ */
+int parmapp::toxint(char c)
 {
     if (c >= '0' && c <= '9')
         return c - 48;
@@ -191,6 +206,37 @@ char parmapp::getchar()
 
     return -1;
 }
+
+/**************************************************************
+ *
+ */
+void parmapp::editparm(kmodparm& parm)
+{
+    char ch;
+    bool isbitmask = parm.parmname.find("debug") == string::npos ?
+                     false : true;
+    while (true) {
+        cout << "  v  " << parm.parmname << ": " << parm.value << endl;
+
+        if (isbitmask) {
+            cout << "  t  bits: " << parm.tobin(parm.value, 8) << endl;
+        }
+        cout << "  q  quit\n";
+
+        cout << "  Press v to change the value";
+        if (isbitmask)
+            cout << "or t to toggle a bit";
+        cout << ": ";
+
+        cout.flush();
+        ch = getchar();
+
+        if (ch == 'q')
+            return;
+
+    }
+}
+
 
 /**************************************************************
  *
@@ -230,7 +276,7 @@ void parmapp::showmenu()
              << std::left <<  setw(15) << parms[i].parmname
              << ": " << parms[i].value << endl;
     }
-    cout << endl;
+    cout << "  q  quit\n\n";
     cout << "  Select a parameter to edit: ";
     cout.flush();
 
@@ -254,10 +300,9 @@ void parmapp::getmenu()
         if (i == -1 || (uint)i >= parms.size())
             continue;
 
+        cout << endl << endl;
         kmodparm parm = parms[i];
-        cout << "\ni: " << i << " kmmod: " << parm.kmodname << " "
-             << "parm: " << parm.parmname << endl;
-
+        editparm(parm);
     }
 
 }
