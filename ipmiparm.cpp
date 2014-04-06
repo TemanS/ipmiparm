@@ -139,7 +139,7 @@ void parmapp::init_kmod(string kmod)
         cmd.str("");
         s2.str("");
         cmd << "cat " << dir << str << "\n";
-	cmd.flush();
+        cmd.flush();
         shell(cmd, s2);
         s2 >> parms[i].value;
         ++i;
@@ -331,7 +331,8 @@ void parmapp::editparmbitmask(kmodparm& parm)
         }
         cmd.str("");
         ss.str("");
-        parmfile = topdir + "module/" + parm.kmodname + "/parameters/" + parm.parmname;
+        parmfile = topdir + "module/" + parm.kmodname
+                 + "/parameters/" + parm.parmname;
         cmd << "echo " << parm.value << " > " << parmfile << "\n";
         shell(cmd, ss);
     }
@@ -422,9 +423,10 @@ void parmapp::getmenu()
 /**************************************************************
 ** main - the main program
 ***************************************************************/
-int main(int argc, char** argv)
+//int main(int argc, char** argv)
+int main()
 {
-    cout << argv[0] << ": ipmi kmod parameter manager\n";
+    // cout << argv[0] << ": ipmi kmod parameter manager\n";
     parmapp pa;
     pa.getmenu();
      return 0;
