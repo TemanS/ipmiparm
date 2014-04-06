@@ -45,8 +45,7 @@ public:
 
     kmodparm() {value = 0; m_isbitmask = false; }
 
-    int togglebit(int bit, int& mask) { return bit xor mask; }
-    string tobin(int hex, int bits);
+    int togglebit(int bit, int& mask);
 
     string kmodname;
     string parmname;
@@ -56,16 +55,14 @@ private:
     bool   m_isbitmask;
 };
 
-string kmodparm::tobin(int num, int bits)
+/**************************************************************
+ * kmodparm::togglebit - toggle a bit in a bitmask
+ *
+ */int kmodparm::togglebit(int bit, int &mask)
 {
-    string temp;
-    int bit;
-    temp.resize(bits);
-    for (int i = 0; i < bits; ++i) {
-        bit = 1 << i;
-        temp[i] = bit & num ? '1' : '0';
-    }
-    return temp;
+    bit = (1 << bit);
+    mask = bit xor mask;
+    return mask;
 }
 
 /**************************************************************
@@ -75,17 +72,24 @@ class parmapp {
 public:
     parmapp() {init();}
     parmapp(int test) {init(test);}
-    void dump();
-    int shell(stringstream& command, stringstream& outstr);
-    void getmenu();
-    void showmenu();
-    template <typename T> void init_parms(T parm, stringstream vals);
-    char getchar();
-    int toxint(char c);
-    void editparm(kmodparm& parm);
+
+    void   dump();
+    int    shell(stringstream& command, stringstream& outstr);
+    void   getmenu();
+    void   showmenu();
+    char   getchar();
+    int    toxint(char c);
+    string tobin(int hex, int bits);
+    void   editparm(kmodparm& parm);
+    void   editparmbitmask(kmodparm& parm);
+    int    getint(string prompt, int curval = 0);
+    bool   toggleradix() {hexdec = !hexdec; return hexdec;}
+    string getradixstr() {return hexdec ? "hex" : "dec";}
 
 private:
     string topdir;
+    bool hexdec;            // hex radix when true, dec when false
+    bool binary;            // binary input enabled for bitmasks when true
     vector<kmodparm> parms;
 
     void init(bool test = false);
@@ -93,6 +97,7 @@ private:
 };
 
 /**************************************************************
+ * parmapp::dump - dump the contents of the vector of kemod parms
  *
  */
 void parmapp::dump()
@@ -105,14 +110,11 @@ void parmapp::dump()
 }
 
 /**************************************************************
+ * parmapp::init_kmod - Initialize the vector of kmod parameters
+ *                      by reading the contents of the parameter
+ *                      files in sysfs.
  *
- */
-template <typename T> void parmapp::init_parms(T parm, stringstream vals)
-{
-
-}
-
-/**************************************************************
+ * Makes a system() call to the bash shell.
  *
  */
 void parmapp::init_kmod(string kmod)
@@ -142,11 +144,14 @@ void parmapp::init_kmod(string kmod)
 }
 
 /**************************************************************
+ * parmapp::init - top level init routine
  *
  */
 void parmapp::init(bool test)
 {
     topdir = test ? "$HOME/" : "/sys/";
+    hexdec = true;
+    binary = false;
     init_kmod("ipmi_si");
     init_kmod("ipmi_msghandler");
 }
@@ -165,7 +170,7 @@ int parmapp::shell(stringstream& command, stringstream& outstr)
     char buff[BUFSIZ];
     FILE *fp = popen(command.str().c_str(), "r");
 
-    while (fgets( buff, BUFSIZ, fp ) != NULL )
+    while (fgets(buff, BUFSIZ, fp ) != NULL)
         outstr << buff;
 
     pclose(fp);
@@ -189,6 +194,18 @@ char parmapp::getchar()
     return *ans.str().c_str();
 }
 
+string parmapp::tobin(int num, int bits)
+{
+    string temp;
+    int bit;
+    temp.resize(bits);
+    for (int i = 0; i < bits; ++i) {
+        bit = 1 << (bits - 1 - i);
+        temp[i] = bit & num ? '1' : '0';
+    }
+    return temp;
+}
+
 /**************************************************************
  * parmapp::toxint - convert single hex (base 16) chars to digits
  *
@@ -208,41 +225,106 @@ int parmapp::toxint(char c)
 }
 
 /**************************************************************
+ * parmapp::getint - obtain multi-char input from user accepting
+ *                   only hex or decimal characters, depending
+ *                   on the parmapp::radix variable.
+ *
+ */
+int parmapp::getint(string prompt, int curval)
+{
+    int num;
+    bool cnvgood;
+    string str;
+
+    while (true) {
+        cout << prompt;
+        //cout.flush();
+        getline(cin, str);
+
+        // If user simply pressed return key, return with the
+        // current value.
+        //
+        if(str == "")
+            return curval;
+
+        // This code converts from string to number safely.
+        //
+        stringstream ss(str);
+        if (hexdec)
+            cnvgood = (ss >> hex >> num);
+        else
+            cnvgood = (ss >> num);
+
+        if (cnvgood)
+            break;
+
+        cout << "Invalid number, please try again" << endl;
+    }
+    return num;
+}
+
+/**************************************************************
+ * parmapp::editparm - get a new value for the kmod parameter
  *
  */
 void parmapp::editparm(kmodparm& parm)
 {
+    printf("  %-15s: %3d  :  0x%02x\n",
+           parm.parmname.c_str(),
+           parm.value, parm.value);
+    cout << "----------------------------------\n";
+    parm.value = getint("  New value: ", parm.value);
+}
+
+
+/**************************************************************
+ * parmapp::editparmbitmask - get a new value for the kmod
+ *                            parameter as a bitmask.
+ *
+ * Provides ability to change individual bits in the value,
+ * rather than changing the whole value with one input.
+ *
+ */
+void parmapp::editparmbitmask(kmodparm& parm)
+{
     char ch;
-    bool isbitmask = parm.parmname.find("debug") == string::npos ?
-                     false : true;
+
     while (true) {
-        cout << "  v  " << parm.parmname << ": " << parm.value << endl;
-
-        if (isbitmask) {
-            cout << "  t  bits: " << parm.tobin(parm.value, 8) << endl;
-        }
-        cout << "  q  quit\n";
-
-        cout << "  Press v to change the value";
-        if (isbitmask)
-            cout << "or t to toggle a bit";
-        cout << ": ";
-
+        printf("  %-15s: %3d  :  0x%02x  :  %s\n",
+               parm.parmname.c_str(), parm.value, parm.value,
+               tobin(parm.value, 8).c_str());
+        cout << "  --------------------------------------------\n";
+        cout << "  Number from 0 to 7 to toggles the corresponding bit.\n";
+        cout << "  v  prompts to change the value directly\n";
+        cout << "  q  quit\n\n";
+        cout << "  Your choice: ";
         cout.flush();
         ch = getchar();
+        cout << endl;
 
-        if (ch == 'q')
-            return;
-
+        switch (ch) {
+        case 'q' : return;
+        case 'v' : parm.value = getint("  New Value: ", parm.value); break;
+        case '0' :
+        case '1' :
+        case '2' :
+        case '3' :
+        case '4' :
+        case '5' :
+        case '6' :
+        case '7' : parm.togglebit(toxint(ch), parm.value); break;
+        }
     }
 }
 
 
 /**************************************************************
+ * parmapp::showmenu - top level menu
  *
  */
 void parmapp::showmenu()
 {
+    bool newkmod;
     string kmod = "";
     string cu = "";         // compilation unit of the kmod
 
@@ -253,8 +335,10 @@ void parmapp::showmenu()
         //
         if (kmod != parms[i].kmodname) {
             kmod  = parms[i].kmodname;
+            newkmod = true;
+            cu = parms[i].parmname.substr(0,2);
             cout << "\n  kmod: " << kmod << endl
-                 << "  -----------------------------\n";
+                 << "  -----------------------------------\n";
         }
 
         // kmod parameters are grouped by their compilation units
@@ -268,45 +352,61 @@ void parmapp::showmenu()
         // the other parameters in that compilation unit, then it
         // will be separated by a space.
         //
-        if (cu != parms[i].parmname.substr(0,2) && i > 0) {
+        if (cu != parms[i].parmname.substr(0,2) && !newkmod) {
             cu = parms[i].parmname.substr(0,2);
             cout << endl;
         }
-        cout << "  " << setbase(16) << i << "  " << setbase(10)
-             << std::left <<  setw(15) << parms[i].parmname
-             << ": " << parms[i].value << endl;
+        newkmod = false;
+
+        printf("  %0x  %-15s: %3d  :  0x%02x\n", i,
+               parms[i].parmname.c_str(),
+               parms[i].value, parms[i].value);
     }
+    cout << "\n  r  switch radix. Current input radix: "
+         << getradixstr() << endl;
     cout << "  q  quit\n\n";
     cout << "  Select a parameter to edit: ";
     cout.flush();
-
 }
 
 /**************************************************************
+ * parmapp::getmenu - top level menu parser and main program loop
  *
  */
 void parmapp::getmenu()
 {
     char ch;
+    string parmfile = topdir + "module/";
+    stringstream cmd;
+    stringstream ss;
 
     while (true) {
         showmenu();
         ch = getchar();
 
-        if (ch == 'q')
-            return;
+        switch (ch) {
+        case 'q': return;
+        case 'r': toggleradix(); break;
+        }
 
         int i = toxint(ch);
         if (i == -1 || (uint)i >= parms.size())
             continue;
 
         cout << endl << endl;
-        kmodparm parm = parms[i];
-        editparm(parm);
+
+        if (parms[i].parmname.find("debug") == string::npos)
+            editparm(parms[i]);
+        else
+            editparmbitmask(parms[i]);
+
+        cmd.str("");
+        ss.str("");
+        parmfile += parms[i].kmodname + "/parameters/" + parms[i].parmname;
+        cmd << "echo " << parms[i].value << " > " << parmfile;
+        shell(cmd, ss);
     }
-
 }
-
 
 /**************************************************************
 ** main - the main program
@@ -315,7 +415,6 @@ int main(int argc, char** argv)
 {
     cout << argv[0] << ": ipmi kmod parameter manager\n";
     parmapp pa(argc);
-    pa.dump();
     pa.getmenu();
      return 0;
 }
