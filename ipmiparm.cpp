@@ -66,6 +66,17 @@ private:
 }
 
 /**************************************************************
+ * class kmod
+ *************************************************************/
+class kmod {
+public:
+    kmod(){}
+    string kmodname;
+    vector<kmodparm> parms;
+};
+
+
+/**************************************************************
  * class parmapp
  *************************************************************/
 class parmapp {
@@ -77,6 +88,8 @@ public:
     int    shell(stringstream& command, stringstream& outstr);
     void   getmenu();
     void   showmenu();
+    void   showkmodmenu(int pos);
+    void   getkmodmenu(int pos);
     char   getchar();
     int    toxint(char c);
     string tobin(int hex, int bits);
@@ -90,7 +103,7 @@ private:
     string topdir;
     bool hexdec;            // hex radix when true, dec when false
     bool binary;            // binary input enabled for bitmasks when true
-    vector<kmodparm> parms;
+    vector<kmod> kmods;
 
     void init(bool test = false);
     void init_kmod(string kmod);
@@ -102,10 +115,14 @@ private:
  */
 void parmapp::dump()
 {
-    for (uint i = 0; i < parms.size(); ++i) {
-        cout << "kmod: " << parms[i].kmodname
-             << "  parm: " << parms[i].parmname
-             << "  val: " << parms[i].value << endl;
+    for (uint j = 0; j < kmods.size(); ++j) {
+        vector<kmodparm>& parms = kmods[j].parms;
+        kmod& km = kmods[j];
+        for (uint k = 0; k < km.parms.size(); ++k) {
+            cout << "kmod: " << km.parms[k].kmodname
+                 << "  parm: " << km.parms[k].parmname
+                 << "  val: " << km.parms[k].value << endl;
+         }
     }
 }
 
@@ -117,32 +134,39 @@ void parmapp::dump()
  * Makes a system() call to the bash shell.
  *
  */
-void parmapp::init_kmod(string kmod)
+void parmapp::init_kmod(string kmodstr)
 {
     stringstream cmd;
     stringstream s1;
     stringstream s2;
     string str;
-    string dir = topdir + "module/" + kmod + "/parameters/";
-    int i = parms.size();
+    string dir = topdir + "module/" + kmodstr + "/parameters/";
+    int j = kmods.size();
+    int k = 0;
+
+    kmods.resize(j + 1);
+    kmods[j].kmodname = kmodstr;
+    kmod& km = kmods[j];
 
     cmd << "ls " << dir;
     shell(cmd, s1);
 
     while (getline(s1, str)) {
-	if (str == "hotmod")
-		continue;
-        parms.resize(parms.size() + 1);
-        parms[i].kmodname = kmod;
-        parms[i].parmname = str;
+
+	    if (str == "hotmod")
+		    continue;
+
+        km.parms.resize(km.parms.size() + 1);
+        km.parms[k].kmodname = kmodstr;
+        km.parms[k].parmname = str;
 
         cmd.str("");
         s2.str("");
         cmd << "cat " << dir << str << "\n";
         cmd.flush();
         shell(cmd, s2);
-        s2 >> parms[i].value;
-        ++i;
+        s2 >> km.parms[k].value;
+        ++k;
     }
 }
 
@@ -157,6 +181,7 @@ void parmapp::init(bool test)
     binary = false;
     init_kmod("ipmi_si");
     init_kmod("ipmi_msghandler");
+    init_kmod("ipmi_watchdog");
 }
 
 /**************************************************************
@@ -338,6 +363,63 @@ void parmapp::editparmbitmask(kmodparm& parm)
     }
 }
 
+/**************************************************************
+ * parmapp::showkmodmenu - menu of kmod parameters that can be edited
+ *
+ * kmodvec - the position int he kmod vector where the parameters for
+ *           this kmod start.
+ */
+void parmapp::showkmodmenu(int pos)
+{
+    vector<kmodparm> parms = kmods[pos].parms;
+
+    cout << " " << kmods[pos].kmodname << " parameters\n"
+         <<    " --------------------------------------\n";
+
+    for (uint i = 0; i < parms.size(); ++i) {
+        printf("  %0x  %-19s: %3d  :  0x%02x\n", i,
+               parms[i].parmname.c_str(),
+               parms[i].value, parms[i].value);
+     }
+
+    cout << "\n  r  switch radix. Current input radix: "
+         << getradixstr() << endl;
+    cout << "  q  quit\n\n";
+    cout << "  Select a parameter to edit: ";
+    cout.flush();
+}
+
+void parmapp::getkmodmenu(int pos)
+{
+    kmod& km = kmods[pos];
+    char ch;
+
+    while (true) {
+        cout << endl;
+        showkmodmenu(pos);
+        ch = getchar();
+
+        switch (ch) {
+        case 'q': cout << endl; return;
+        case 'r': toggleradix(); break;
+        }
+
+        int i = toxint(ch);
+        if (i == -1 || (uint)i >= km.parms.size())
+            continue;
+
+        // If it's a debug parameter, it will be a bitmaks, else it is a
+        // simple value. We determine it's a debug parameter by looking for
+        // "debug" in the parameter's name string.
+        //
+        if (km.parms[i].parmname.find("debug") == string::npos)
+            editparm(km.parms[i]);
+        else
+            editparmbitmask(km.parms[i]);
+
+        cout << endl;
+    }
+}
 
 /**************************************************************
  * parmapp::showmenu - top level menu
@@ -345,48 +427,18 @@ void parmapp::editparmbitmask(kmodparm& parm)
  */
 void parmapp::showmenu()
 {
-    bool newkmod;
     string kmod = "";
-    string cu = "";         // compilation unit of the kmod
 
-    for (uint i = 0; i < parms.size(); ++i) {
+    cout << "\nSelect a kmod to change its parameters\n"
+         <<   "--------------------------------------\n";
 
-        // A new line and separator line is printed when we start
-        // showing parameters from a new kmod.
-        //
-        if (kmod != parms[i].kmodname) {
-            kmod  = parms[i].kmodname;
-            newkmod = true;
-            cu = parms[i].parmname.substr(0,2);
-            cout << "\n  kmod: " << kmod << endl
-                 << "  -----------------------------------\n";
-        }
+    for (uint i = 0; i < kmods.size(); ++i)
+        printf("  %d  %s\n", i, kmods[i].kmodname.c_str());
 
-        // kmod parameters are grouped by their compilation units
-        // (source files) and are set apart by a leading newline.
-        //
-        // Compilation unit (source file) in the kmod should be
-        // identifiable with the first three characters of the
-        // parameter name, since they were named with this
-        // convention. If a parameter belonging to a compilation
-        // unit does not have the same first three characters as
-        // the other parameters in that compilation unit, then it
-        // will be separated by a space.
-        //
-        if (cu != parms[i].parmname.substr(0,2) && !newkmod) {
-            cu = parms[i].parmname.substr(0,2);
-            cout << endl;
-        }
-        newkmod = false;
-
-        printf("  %0x  %-15s: %3d  :  0x%02x\n", i,
-               parms[i].parmname.c_str(),
-               parms[i].value, parms[i].value);
-    }
     cout << "\n  r  switch radix. Current input radix: "
          << getradixstr() << endl;
     cout << "  q  quit\n\n";
-    cout << "  Select a parameter to edit: ";
+    cout << "  Select a kmod to access its parameters: ";
     cout.flush();
 }
 
@@ -408,15 +460,13 @@ void parmapp::getmenu()
         }
 
         int i = toxint(ch);
-        if (i == -1 || (uint)i >= parms.size())
+        if (i == -1 || (uint)i >= kmods.size())
             continue;
 
         cout << endl << endl;
+        cout.flush();
 
-        if (parms[i].parmname.find("debug") == string::npos)
-            editparm(parms[i]);
-        else
-            editparmbitmask(parms[i]);
+        getkmodmenu(i);
     }
 }
 
