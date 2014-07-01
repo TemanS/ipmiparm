@@ -43,13 +43,15 @@ using namespace std;
 class kmodparm {
 public:
 
-    kmodparm() {value = 0; m_isbitmask = false; }
+    kmodparm() {value = 0; m_isbitmask = false; isstring = false; }
 
     int togglebit(int bit, int& mask);
 
     string kmodname;
     string parmname;
     int    value;
+    string strval;
+    bool   isstring;
 
 private:
     bool   m_isbitmask;
@@ -95,9 +97,12 @@ public:
     string tobin(int hex, int bits);
     void   editparm(kmodparm& parm);
     void   editparmbitmask(kmodparm& parm);
-    int    getint(string prompt, int curval = 0);
     bool   toggleradix() {hexdec = !hexdec; return hexdec;}
     string getradixstr() {return hexdec ? "hex" : "dec";}
+    string getstr(string prompt, string curval);
+    int    getint(string prompt, int curval = 0);
+    bool   isint(string& s);
+    bool   str2int(string& str, int& num);
 
 private:
     string topdir;
@@ -116,12 +121,15 @@ private:
 void parmapp::dump()
 {
     for (uint j = 0; j < kmods.size(); ++j) {
-        vector<kmodparm>& parms = kmods[j].parms;
-        kmod& km = kmods[j];
+       kmod& km = kmods[j];
         for (uint k = 0; k < km.parms.size(); ++k) {
             cout << "kmod: " << km.parms[k].kmodname
-                 << "  parm: " << km.parms[k].parmname
-                 << "  val: " << km.parms[k].value << endl;
+                 << "  parm: " << km.parms[k].parmname;
+
+            if(km.parms[k].isstring)
+                cout << "  val: " << km.parms[k].strval << endl;
+            else
+                cout << "  val: " << km.parms[k].value << endl;
          }
     }
 }
@@ -145,6 +153,7 @@ void parmapp::init_kmod(string kmodstr)
     int k = 0;
 
     kmods.resize(j + 1);
+
     kmods[j].kmodname = kmodstr;
     kmod& km = kmods[j];
 
@@ -160,12 +169,20 @@ void parmapp::init_kmod(string kmodstr)
         km.parms[k].kmodname = kmodstr;
         km.parms[k].parmname = str;
 
-        cmd.str("");
+        s2.clear();
         s2.str("");
+        cmd.str("");
         cmd << "cat " << dir << str << "\n";
         cmd.flush();
         shell(cmd, s2);
-        s2 >> km.parms[k].value;
+
+        if ((s2 >> km.parms[k].value).fail()) {
+            s2.clear();
+            s2 >> km.parms[k].strval;
+            km.parms[k].isstring = true;
+        } else
+            km.parms[k].isstring = false;
+
         ++k;
     }
 }
@@ -253,6 +270,39 @@ int parmapp::toxint(char c)
 }
 
 /**************************************************************
+ * parmapp::isint - test the string to see whether it's an int
+ */
+bool parmapp::isint(string& s)
+{
+    bool isnumber = true;
+
+    for(string::const_iterator k = s.begin(); k != s.end(); ++k) {
+        if (hexdec)
+            isnumber = isnumber && isxdigit(*k);
+        else
+            isnumber = isnumber && isdigit(*k);
+    }
+
+    return isnumber;
+}
+
+/**************************************************************
+ * parmapp::str2int - safely convert a string to an int
+ */
+bool parmapp::str2int(string& str, int& num)
+{
+    stringstream ss(str);
+
+    if (!isint(str))
+        return false;
+
+    if (hexdec)
+        return (ss >> hex >> num);
+    else
+        return (ss >> num);
+}
+
+/**************************************************************
  * parmapp::getint - obtain multi-char input from user accepting
  *                   only hex or decimal characters, depending
  *                   on the parmapp::radix variable.
@@ -261,12 +311,10 @@ int parmapp::toxint(char c)
 int parmapp::getint(string prompt, int curval)
 {
     int num;
-    bool cnvgood;
     string str;
 
     while (true) {
         cout << prompt;
-        //cout.flush();
         getline(cin, str);
 
         // If user simply pressed return key, return with the
@@ -275,15 +323,7 @@ int parmapp::getint(string prompt, int curval)
         if(str == "")
             return curval;
 
-        // This code converts from string to number safely.
-        //
-        stringstream ss(str);
-        if (hexdec)
-            cnvgood = (ss >> hex >> num);
-        else
-            cnvgood = (ss >> num);
-
-        if (cnvgood)
+        if(str2int(str, num))
             break;
 
         cout << "Invalid number, please try again" << endl;
@@ -292,24 +332,65 @@ int parmapp::getint(string prompt, int curval)
 }
 
 /**************************************************************
+ * parmapp::getstr - present a prompt and obtain a string rom user
+ */
+string parmapp::getstr(string prompt, string curval)
+{
+    string str;
+
+    cout << prompt;
+    getline(cin, str);
+
+    // If user simply pressed return key, return with the
+    // current value.
+    //
+    if(str == "")
+        return curval;
+
+    return str;
+}
+
+/**************************************************************
  * parmapp::editparm - get a new value for the kmod parameter
  *
  */
 void parmapp::editparm(kmodparm& parm)
 {
-    string parmfile = topdir;
+    string parmfile;
     stringstream cmd;
     stringstream ss;
+    string linestr = "-----------------------------------------\n";
+    string prompt = "  New value: ";
 
-    printf("  %-15s: %3d  :  0x%02x\n",
-           parm.parmname.c_str(),
-           parm.value, parm.value);
-    cout << "----------------------------------\n";
-    parm.value = getint("  New value: ", parm.value);
-    cmd.str("");
+    parmfile = topdir + "module/" + parm.kmodname
+                      + "/parameters/" + parm.parmname;
+
+    printf("  %s - Current Value: ", parm.parmname.c_str());
+    ss.clear();
     ss.str("");
-    parmfile = topdir + "module/" + parm.kmodname + "/parameters/" + parm.parmname;
-    cmd << "echo " << parm.value << " > " << parmfile << "\n";
+    cmd.str("");
+    cmd << "echo ";
+
+    if(parm.isstring) {
+        printf("%s\n", parm.strval.c_str());
+        cout << linestr;
+        parm.strval = getstr(prompt, parm.strval);
+        if (str2int(parm.strval, parm.value)) {
+            parm.isstring = false;
+            cmd << parm.value;
+        } else {
+            parm.isstring = true;
+            cmd << parm.strval;
+        }
+    } else {
+        printf("%3d  :  0x%02x\n", parm.value, parm.value);
+        cout << linestr;
+        parm.value = getint(prompt, parm.value);
+        cmd << parm.value;
+    }
+
+    cmd << " > " << parmfile << "\n";
+    cmd.flush();
     shell(cmd, ss);
 }
 
@@ -377,9 +458,12 @@ void parmapp::showkmodmenu(int pos)
          <<    " --------------------------------------\n";
 
     for (uint i = 0; i < parms.size(); ++i) {
-        printf("  %0x  %-19s: %3d  :  0x%02x\n", i,
-               parms[i].parmname.c_str(),
-               parms[i].value, parms[i].value);
+        printf("  %0x  %-19s: ", i, parms[i].parmname.c_str());
+
+        if(parms[i].isstring)
+            printf("str %s\n", parms[i].strval.c_str());
+        else
+            printf("int %3d  :  0x%02x\n", parms[i].value, parms[i].value);
      }
 
     cout << "\n  r  switch radix. Current input radix: "
@@ -398,6 +482,7 @@ void parmapp::getkmodmenu(int pos)
         cout << endl;
         showkmodmenu(pos);
         ch = getchar();
+        cout << endl;
 
         switch (ch) {
         case 'q': cout << endl; return;
@@ -408,7 +493,7 @@ void parmapp::getkmodmenu(int pos)
         if (i == -1 || (uint)i >= km.parms.size())
             continue;
 
-        // If it's a debug parameter, it will be a bitmaks, else it is a
+        // If it's a debug parameter, it will be a bitmask, else it is a
         // simple value. We determine it's a debug parameter by looking for
         // "debug" in the parameter's name string.
         //
@@ -476,9 +561,12 @@ void parmapp::getmenu()
 //int main(int argc, char** argv)
 int main()
 {
-    // cout << argv[0] << ": ipmi kmod parameter manager\n";
+    string version = "v1.0";
+
+    cout << "\nipmiparm " << version << " ipmi kmod parameter manager\n";
+
     parmapp pa;
     pa.getmenu();
-     return 0;
+    return 0;
 }
 
