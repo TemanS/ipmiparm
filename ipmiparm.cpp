@@ -31,6 +31,7 @@
 #include <vector>
 #include <string>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <sstream>
 #include <iomanip>
@@ -103,6 +104,8 @@ public:
     int    getint(string prompt, int curval = 0);
     bool   isint(string& s);
     bool   str2int(string& str, int& num);
+    int    str2int(string& str);
+    int    tokenize(stringstream& ss, vector<string>& tokens);
 
 private:
     string topdir;
@@ -113,6 +116,28 @@ private:
     void init(bool test = false);
     void init_kmod(string kmod);
 };
+
+/**************************************************************
+ * parmapp::tokenize - tokenizes a string stream and creates a
+ *                     vector of strings.
+ * ss       - stringstream to tokenize
+ * tokens   - a vector of strings
+ *
+ * Returns the number of tokens
+ *
+ */
+int parmapp::tokenize (stringstream& ss, vector<string>& tokens)
+{
+    int i;
+    string str;
+
+    for (i = 0; ss.eof() == false; ++i) {
+        ss >> str;
+        tokens.push_back(str);
+    }
+    return i;
+}
+
 
 /**************************************************************
  * parmapp::dump - dump the contents of the vector of kemod parms
@@ -152,13 +177,14 @@ void parmapp::init_kmod(string kmodstr)
     int j = kmods.size();
     int k = 0;
 
+    cmd << "ls 2>/dev/null " << dir;
+    if (shell(cmd, s1))
+        return;
+
     kmods.resize(j + 1);
 
     kmods[j].kmodname = kmodstr;
     kmod& km = kmods[j];
-
-    cmd << "ls " << dir;
-    shell(cmd, s1);
 
     while (getline(s1, str)) {
 
@@ -209,17 +235,35 @@ void parmapp::init(bool test)
  *           output from the shell after running the command
  * BUFSIZ  - defined by the compiler. In g++ running on Linux
  *           64-bit kernel, it's 8192.
+ *
+ * Returns the status of the OS call.
+ *
  */
 int parmapp::shell(stringstream& command, stringstream& outstr)
 {
+    int retval;
+    int retidx;
+    int i;
+    vector<string> tokens;
     char buff[BUFSIZ];
+
+    command << "\necho $?\n";
+    command.flush();
+
     FILE *fp = popen(command.str().c_str(), "r");
 
-    while (fgets(buff, BUFSIZ, fp ) != NULL)
-        outstr << buff;
+    for (i = 0; fgets(buff, BUFSIZ, fp ) != NULL; ++i)
+        tokens.push_back(buff);
 
     pclose(fp);
-    return 0;
+
+    retidx = i - 1;
+    retval = str2int(tokens[retidx]);
+
+    for (i = 0; i < retidx; ++i)
+        outstr << tokens[i];
+
+    return retval;
 }
 
 /**************************************************************
@@ -288,18 +332,53 @@ bool parmapp::isint(string& s)
 
 /**************************************************************
  * parmapp::str2int - safely convert a string to an int
+ *
+ * This version of the function first determines whether the str
+ * actually contains a number, depending on the radix. For exapmle,
+ * with the parmapp class hexdec set for hexadecimal, foo is not
+ * considered a number while f00 is.
+ *
+ * str  - string to convert
+ * num  - integer value of the converted number
+ *
+ * Returns true if the str is indeed a number, else false and
+ * the value of num is undefined.
  */
 bool parmapp::str2int(string& str, int& num)
 {
-    stringstream ss(str);
-
     if (!isint(str))
         return false;
 
+    num = str2int(str);
+    return true;
+}
+
+/**************************************************************
+ * parmapp::str2int - safely convert a string to an int
+ *
+ * This version of the function simply performs the conversion
+ * without worrying whether the str contains a real number. This
+ * version of the function is only used when you KNOW that the
+ * str has a real number in it. For example, with parmapp::hexdec
+ * set to true (hexadecimal mode), then foo will be evaluated as
+ * 15.
+ *
+ * str  - string to convert
+ *
+ * Returns the converted integer. Returns 0 if the integer could
+ * not be converted.
+ */
+int parmapp::str2int(string& str)
+{
+    int num;
+    stringstream ss(str);
+
     if (hexdec)
-        return (ss >> hex >> num);
+        ss >> hex >> num;
     else
-        return (ss >> num);
+        ss >> num;
+
+    return num;
 }
 
 /**************************************************************
